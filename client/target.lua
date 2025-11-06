@@ -1,9 +1,9 @@
 local function AddVehicleTargets()
-    
+
     if Config.Target == "qb" then
         exports['qb-target']:AddGlobalVehicle({
             options = {
-               
+                
                 {
                     icon = "fas fa-lock",
                     label = Locales['target_lock'],
@@ -36,7 +36,6 @@ local function AddVehicleTargets()
             distance = 2.5
         })
 
-    
     elseif Config.Target == "ox" then
         exports.ox_target:addGlobalVehicle({
             {
@@ -69,12 +68,10 @@ local function AddVehicleTargets()
     end
 end
 
-
 CreateThread(function()
     while not NetworkIsSessionStarted() do Wait(100) end
     AddVehicleTargets()
 end)
-
 
 function GetClosestPlayer()
     local players = GetActivePlayers()
@@ -95,7 +92,6 @@ function GetClosestPlayer()
     end
     return closestPlayer, closestDistance
 end
-
 
 function Notify(msg, type)
     local t = type or "inform"
