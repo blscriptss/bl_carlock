@@ -1,42 +1,16 @@
 Config = {}
 
--- Standalone Mode
-Config.Standalone = false -- Set to true to run without any framework or inventory system
+Config.LockCommand = 'lock'
+Config.Keybind = 'L'
 
--- Framework
--- Supported: "qbcore" (for QBCore), "esx" (for ESX)
-Config.Framework = Config.Standalone and nil or "qbcore" -- or "esx"
-
--- Inventory System
--- Supported: "ox", "qb", "qs"
-Config.Inventory = "ox"
-
--- Notify System
--- Supported: "bl_notify" "qb", "okok", "mythic", "ox", "print"
-Config.Notify = "bl_notify"
-
--- Lock Settings
-Config.LockCommand = "lock"
-Config.Keybind = "L"
 Config.MaxVehicleDistance = 4.0
-
--- Animations
-Config.PlayLockAnimation = true
 Config.FlashLights = true
+Config.PlayLockAnimation = true
 Config.PlaySound = true
+ 
+Config.Notify = 'bl_notify' -- 'qb', 'okok', 'mythic', 'ox', 'print' 'bl_notify'
 
--- Debug
-Config.Debug = false
+Config.RequireKeyItem = false
+Config.KeyItemName = 'vehiclekey'
+Config.Inventory = 'ox' -- 'ox', 'qb', 'qs'
 
-
--- ====== Discord Logging ======
-Config.DiscordWebhook = "" -- put your Discord webhook URL here
-
-Config.Discord = {
-    username = "Car Lock Logs",
-    lock_color = 16711680,    -- red
-    unlock_color = 65280,     -- green
-    default_color = 16776960, -- yellow
-    action_title = "Car Lock",
-    footer = "BL Carlock System"
-}
