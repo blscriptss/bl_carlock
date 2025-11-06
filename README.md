@@ -27,7 +27,7 @@ Allows players to lock/unlock vehicles via commands, keybinds, or targeting acti
 ### 1. Download the Resource
 Clone or download the latest release:
 ```bash
-git clone https://github.com/blscriptss/bl_carlock_v1.git
+git clone https://github.com/blscriptss/bl_carlock.git
 ```
 
 ### 2. Install Required Dependency
