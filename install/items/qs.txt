@@ -1,0 +1,7 @@
+['vehiclekey'] = {
+    ['name'] = 'vehiclekey',
+    ['label'] = 'Vehicle Key',
+    ['weight'] = 500,
+    ['type'] = 'item',
+    ['image'] = 'vehiclekey.png',
+},

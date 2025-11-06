@@ -1,0 +1,7 @@
+['vehiclekey'] = {
+    label = 'Vehicle Key',
+    weight = 500,
+    stack = true,
+    description = 'A key to unlock your vehicle.',
+    image = 'vehiclekey.png',
+}

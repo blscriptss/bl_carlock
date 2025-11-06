@@ -1,0 +1,7 @@
+vehiclekey = {
+    name = 'vehiclekey',
+    label = 'Vehicle Key',
+    weight = 100,
+    type = 'item',
+    image = 'vehiclekey.png',
+},
