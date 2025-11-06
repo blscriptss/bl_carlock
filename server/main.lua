@@ -1,26 +1,23 @@
+local sendToAllLoggers = require 'server.logger'
 
--- ====== Discord Logging Helper ======
-local function sendToDiscord(title, description, color)
-    if not Config.DiscordWebhook or Config.DiscordWebhook == "" then return end
-    local embed = {{
-        ["title"] = title or (Config.Discord and Config.Discord.action_title or "Car Lock"),
-        ["description"] = description,
-        ["color"] = color or (Config.Discord and Config.Discord.default_color or 16776960),
-        ["footer"] = {{ ["text"] = (Config.Discord and Config.Discord.footer or "Carlock") .. " | " .. os.date("%Y-%m-%d %H:%M:%S") }}
-    }}
-    PerformHttpRequest(Config.DiscordWebhook, function() end, 'POST', json.encode({
-        username = Config.Discord and Config.Discord.username or "Car Lock Logs",
-        embeds = embed
-    }), { ['Content-Type'] = 'application/json' })
+
+local lockCooldown = {}
+
+local function isOnCooldown(src)
+    local now = os.time()
+    if lockCooldown[src] and (now - lockCooldown[src]) < 2 then  -- 2 seconds cooldown
+        return true
+    end
+    lockCooldown[src] = now
+    return false
 end
 
 
 
--- ====== Safe Config defaults ======
 Config = Config or {}
 Config.RequireKeyItem = Config.RequireKeyItem ~= nil and Config.RequireKeyItem or false
 Config.KeyItemName = Config.KeyItemName or 'vehiclekey'
-Config.Inventory = Config.Inventory or 'qb' -- 'qb' | 'ox' | 'qs' (only used if QBCore)
+Config.Inventory = Config.Inventory or 'qb' -- 'qb' | 'ox' | 'qs'
 Config.Debug = Config.Debug or false
 
 local function dbg(msg)
@@ -29,7 +26,6 @@ local function dbg(msg)
     end
 end
 
--- ====== Framework detection ======
 local Framework = { type = 'standalone', QBCore = nil, ESX = nil }
 
 local function tryGetQBCore()
@@ -80,7 +76,35 @@ CreateThread(function()
     dbg('Running in Standalone mode')
 end)
 
--- ====== Inventory check helpers ======
+function isPlayerVehicle(src, plate)
+    if Framework.QBCore then
+        local player = Framework.QBCore.Functions.GetPlayer(src)
+        if not player then return false end
+        local citizenid = player.PlayerData.citizenid
+        local result = MySQL.Sync.fetchScalar([[
+            SELECT COUNT(*) FROM player_vehicles WHERE plate = @plate AND citizenid = @citizenid
+        ]], {
+            ['@plate'] = plate,
+            ['@citizenid'] = citizenid
+        })
+        return result and result > 0
+    elseif Framework.ESX then
+        local xPlayer = Framework.ESX.GetPlayerFromId(src)
+        if not xPlayer then return false end
+        local identifier = xPlayer.getIdentifier and xPlayer:getIdentifier() or xPlayer.identifier
+        local result = MySQL.Sync.fetchScalar([[
+            SELECT COUNT(*) FROM owned_vehicles WHERE plate = @plate AND owner = @identifier
+        ]], {
+            ['@plate'] = plate,
+            ['@identifier'] = identifier
+        })
+        return result and result > 0
+    end
+
+    return false
+end
+
+
 local function hasKeyItem_qb(src)
     if not Framework.QBCore then
         return false
@@ -122,6 +146,7 @@ local function hasKeyItem_esx(src)
     return false
 end
 
+
 local function checkHasVehicleKey(src)
     if not Config.RequireKeyItem then
         return true
@@ -132,12 +157,10 @@ local function checkHasVehicleKey(src)
     elseif Framework.type == 'esx' then
         return hasKeyItem_esx(src)
     else
-        -- Standalone --
         return false
     end
 end
 
--- ====== QBCore callback (if available) ======
 local function registerQBCoreCallback()
     if Framework.QBCore and Framework.QBCore.Functions and Framework.QBCore.Functions.CreateCallback then
         Framework.QBCore.Functions.CreateCallback('bl_carlock:server:hasVehicleKey', function(source, cb)
@@ -148,52 +171,80 @@ local function registerQBCoreCallback()
     end
 end
 
-
 CreateThread(function()
     Wait(500)
     registerQBCoreCallback()
 end)
 
--- ====== Fallback ======
-RegisterNetEvent('bl_carlock:server:hasVehicleKeyReq', function(token)
+    RegisterNetEvent('bl_carlock:server:hasVehicleKeyReq', function(token)
     local src = source
+    if isOnCooldown(src) then
+        print(('[bl_carlock] Player %s is spamming lock/unlock'):format(src))
+        return
+    end
+
     local hasKey = checkHasVehicleKey(src)
     TriggerClientEvent('bl_carlock:client:hasVehicleKeyResp', src, token, hasKey)
 end)
 
--- ====== Lock toggle relay ======
 RegisterNetEvent('bl_carlock:server:toggleLock', function(plate, vehicleNet, newLockState)
     local src = source
+    if isOnCooldown(src) then
+        print(('[bl_carlock] Player %s is spamming lock/unlock'):format(src))
+        return
+    end
     local playerName = GetPlayerName(src) or "unknown"
     local action = newLockState and "Unlocked" or "Locked"
+
+    if type(vehicleNet) ~= "number" or vehicleNet < 0 or vehicleNet > 65535 then
+        print(("[bl_carlock] Rejected toggleLock from %s: invalid vehicleNetId %s"):format(src, tostring(vehicleNet)))
+        return
+    end
+
+    local veh = NetworkGetEntityFromNetworkId(vehicleNet)
+    if not DoesEntityExist(veh) then
+        print(("[bl_carlock] Rejected toggleLock from %s: vehicle entity doesn't exist"):format(src))
+        return
+    end
+
+    local ped = GetPlayerPed(src)
+    local dist = #(GetEntityCoords(ped) - GetEntityCoords(veh))
+    if dist > 8.0 then
+        print(("[bl_carlock] Rejected toggleLock from %s: too far from vehicle (%.2f m)"):format(src, dist))
+        return
+    end
 
     local hasKey = false
     if hasVehicleKeyDB then
         hasKey = hasVehicleKeyDB(src, plate)
     else
-        -- Standalone: always allow locking/unlocking for owned vehicle (or disable DB check)
         hasKey = true
     end
 
-    if hasKey then
+    if not isPlayerVehicle(src, plate) then
+        TriggerClientEvent('bl_carlock:client:noKeys', src)
+        return
+    end
+
+    local itemOk = not Config.RequireKeyItem or checkHasVehicleKey(src)
+    if itemOk then
         TriggerClientEvent('bl_carlock:client:setLockState', -1, newLockState, vehicleNet)
-        sendToDiscord(
-            Config.Discord.action_title,
+        sendToAllLoggers(
+            "Vehicle Lock Toggled",
             ("[%s] %s (%s) %s vehicle"):format(plate, playerName, src, action),
-            newLockState and Config.Discord.unlock_color or Config.Discord.lock_color
-        )
+            newLockState and 65280 or 16711680
+)
     else
+        print(("[bl_carlock] Player %s tried to toggleLock without key for %s"):format(src, plate))
         TriggerClientEvent('bl_carlock:client:noKeys', src)
     end
 end)
 
--- ====== Optional stubs for key grant from shops (non-persistent by default) ======
 RegisterNetEvent('bl_carlock:server:giveKey', function(playerId, plate)
     -- If you wire persistence later, insert a row here based on your DB and inventory
     dbg(('Key assigned (stub) plate=%s player=%s'):format(tostring(plate), tostring(playerId)))
 end)
 
--- Compatibility hooks for common dealership resources
 RegisterNetEvent('qb-vehicleshop:server:sellVehicle', function(vehicleData, playerId)
     if vehicleData and vehicleData.plate and playerId then
         TriggerEvent('bl_carlock:server:giveKey', playerId, vehicleData.plate)
@@ -223,4 +274,42 @@ RegisterNetEvent('jg_dealerships:server:vehicleSold', function(playerData, vehic
     if playerData and playerData.source and vehicleData and vehicleData.plate then
         TriggerEvent('bl_carlock:server:giveKey', playerData.source, vehicleData.plate)
     end
+end)
+
+RegisterNetEvent('bl_carlock:server:hasVehicleKeyReq', function(token)
+    local src = source
+    local hasKey = false
+
+    if Config.RequireKeyItem then
+        if Config.Inventory == 'ox' then
+            local count = exports.ox_inventory:Search(src, 'count', Config.KeyItemName)
+            hasKey = count and count > 0
+        elseif Config.Inventory == 'qb' then
+            local Player = Framework and Framework.QBCore and Framework.QBCore.Functions.GetPlayer(src)
+            if Player then
+                for _, item in pairs(Player.Functions.GetItems() or {}) do
+                    if item.name == Config.KeyItemName then
+                        hasKey = true
+                        break
+                    end
+                end
+            end
+        elseif Config.Inventory == 'qs' then
+            local qs = exports['qs-inventory']
+            if qs and qs.GetItemCount then
+                local count = qs:GetItemCount(src, Config.KeyItemName)
+                hasKey = count and count > 0
+            end
+        elseif Config.Framework == 'esx' then
+            local xPlayer = ESX.GetPlayerFromId(src)
+            if xPlayer then
+                local item = xPlayer.getInventoryItem(Config.KeyItemName)
+                hasKey = item and item.count > 0
+            end
+        end
+    else
+        hasKey = true
+    end
+
+    TriggerClientEvent('bl_carlock:client:hasVehicleKeyResp', src, token, hasKey)
 end)
